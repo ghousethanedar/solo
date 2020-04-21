@@ -1,0 +1,77 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'Ubuntu-16.04'
+
+variables:
+  resourcegroup: 'rg02'
+  workspace: 'lab03'
+  experiment: 'solo_insulin_01'
+  location: 'eastus'
+  aml_compute_target: 'diabetics-compute'
+  model_name: 'devsolo-pred'
+  image_name:  'devsolo-image'
+  metric_threshold: '0.8'
+
+steps:
+
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.6'
+    architecture: 'x64'   
+
+- task: Bash@3
+  displayName: 'Install Requirements'
+  inputs:
+    targetType: filePath
+    filePath: 'environment_setup/install_requirements.sh'
+    workingDirectory: 'environment_setup'
+
+- task: AzureCLI@1
+  displayName: 'Install the CLI'
+  inputs:
+    azureSubscription: 'solo-sc'
+    scriptLocation: inlineScript
+    inlineScript: 'az extension add -n azure-cli-ml'
+
+- task: AzureCLI@1
+  displayName: 'Attach folder to workspace'
+  inputs:
+    azureSubscription: 'solo-sc'
+    scriptLocation: inlineScript
+    inlineScript: 'az ml folder attach -e $(experiment) -w $(workspace) -g $(resourcegroup) --path $(Build.SourcesDirectory)'
+
+- task: AzureCLI@1
+  displayName: 'Get or create AML Compute Target'
+  inputs:
+    azureSubscription: 'solo-sc'
+    scriptLocation: inlineScript
+    inlineScript: 'az ml run submit-script -d ./environment_setup/dependencies.yml 
+    ./aml_service/create_aml_cluster.py --aml_compute_target $(aml_compute_target) 
+    --path $(Build.SourcesDirectory)'
+
+- task: AzureCLI@1
+  displayName: 'Master Pipeline'
+  inputs:
+    azureSubscription: 'solo-sc'
+    scriptLocation: inlineScript
+    inlineScript: 'az ml run submit-script -d ./environment_setup/dependencies.yml 
+    ./aml_service/pipelines_master.py --aml_compute_target $(aml_compute_target) 
+    --model_name $(model_name) --image_name $(image_name) --metric_threshold $(metric_threshold) 
+    --path $(Build.SourcesDirectory)'
+
+- task: CopyFiles@2
+  displayName: 'Copy Files to: $(Build.ArtifactStagingDirectory)'
+  inputs:
+    SourceFolder: '$(Build.SourcesDirectory)'
+    TargetFolder: '$(Build.ArtifactStagingDirectory)'
+    Contents: '**'
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Artifact: devops-solo-insulin'
+  inputs:
+    ArtifactName: 'devops-solo-arti'
+    publishLocation: 'container'
+    pathtoPublish: '$(Build.ArtifactStagingDirectory)' 
+    TargetPath: '$(Build.ArtifactStagingDirectory)'
